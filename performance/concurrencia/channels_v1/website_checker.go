@@ -1,13 +1,17 @@
 /*
 	este ejemplo introduce el uso de channels para sincronizar las goroutines.
 
-	Los channels permiten "pasar" datos entre corruntinas y utilizarlos como forma de coordinación
+	Los channels permiten "pasar" datos entre goruntinas y utilizarlos como forma de coordinación
 
 	Este ejemplo se basa en el código de los ejemplos anteriores pero en lugar de imprimir los ruesultados
-	del comando hhtp HEAD a consola, se pasan mediante un canal de nuevo a la gorutina padre (recoradar que el código 
-	que lanza las gorutinas es tambien una!)
+	del comando http HEAD a consola, se pasan - mediante un canal - nuevamente a la gorutina padre (recordar que el código 
+	que lanza las gorutinas es también una!)
 
-	al ejecutar presetar atención al orden en que se depliega el workerId o el url y
+	ver ejemplos de uso de canales en:
+	 - código de ejemplo de varias gorutinas escribiendo de un canal https://go.dev/play/p/quQn7xePLw
+	 - código de ejemplo de varias gorutinas leyendo de un canal https://go.dev/play/p/ESq9he_WzS
+
+	al ejecutar prestar atención al orden en que se despliega el workerId o el url y
 	a la cantidad de segundos que duró la ejecución (con go test -bench)
 
 	el ejemplo se adapta de https://github.com/quii/learn-go-with-tests/tree/main/concurrency
@@ -40,14 +44,14 @@ func CheckWebsites(urls []string)  {
 		workers++
 	}
 	
-	//este for se comienza a ejecutar luego de haberse lanzado las gorutimas
-	// va sacando del canal a media que las goruntinas agregan
+	//este for se comienza a ejecutar luego de haberse lanzado las gorutinas
+	// va sacando del canal a media que las gorutinas agregan
 	for i := 0; i < len(urls); i++ { 
 		strVal := <- resultStream
 		fmt.Printf("%s ",strVal)
 	}
 	//se cierra el canal porque no se usa mas, todas las gorutinas terminaron y esta 
-	//ya desplego todos los datos
+	//ya desplegó todos los datos
 	close(resultStream)
 }
 

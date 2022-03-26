@@ -6,29 +6,29 @@
 
 	para ejecutar una función como goroutine solo se agrega la palabra clave go delante de la función
 	ej. 	go CheckOneWebsite(url, workers, &wg)
-	tambien se puede realizar con funciones anonimas
+	tambien se puede realizar con funciones anónimas
 	ej.  	go func (u string, workerId int)  {
 
 	Go cuenta con dos grupos de mecanismos de concurrencia.
 	el paquete syn que permite forkear goroutines y hacer join de su ejecución
-	sync tambien cuenta con semaforos (mutex y variantes) para proteger variables o "memoria" que
-	comparten las goroutines. En este caso las gorrutinas no comparten información.
-	Por ejemplo si quisieramos utilizar una slice o map para guardar los resutados que se
+	sync también cuenta con semáforos (mutex y variantes) para proteger variables o "memoria" que
+	comparten las goroutines. En este caso las gorutinas no comparten información.
+	Por ejemplo, si quisieramos utilizar una slice o map para guardar los resutados que se
 	despliegan cada llamada a CheckOneWebsite(...) esa estructura deberia estar protegida
 	por un sync.Mutex
 
 	Este ejemplo solamente utiliza el mecanismo de fork y join que se conoce como WaitGroup
 	el WaitGroup permite
-	  - llevar el contardor de goroutinas a sincroniizar Add(n)
+	  - llevar el contardor de goroutinas a sincronizar Add(n)
 	  - decrementar el contador cuando una goroutina termina Done()
 	  - esperar que todas las goroutinas en ejecución terminen Wait()
 
-	puede ejecuarlo con
+	puede ejecutarlo con
 		go run . para ejecutar el main o
-		go test -bench=. que ejecuta un benchamrk para ver los tiempo que domra la ejecución
+		go test -bench=. que ejecuta un benchamrk para ver los tiempo que demora la ejecución
 		concurrente
 
-	al ejecutar presetar atención al orden en que se depliega el workerId o el url y
+	al ejecutar prestar atención al orden en que se despliega el workerId o el url y
 	a la cantidad de segundos que duró la ejecución (con go test -bench)
 
 

@@ -1,27 +1,28 @@
 /*
-	este ejemplo es el mismo que sync_v1 pero utilizando goroutines como funciones anonimas.
+	este ejemplo es el mismo que sync_v1 pero utilizando goroutines como funciones anónimas.
 		ej.  	go func (u string, workerId int)  {
 
 	Go cuenta con dos grupos de mecanismos de concurrencia.
 	el paquete syn que permite forkear goroutines y hacer join de su ejecución
-	sync tambien cuenta con semaforos (mutex y variantes) para proteger variables o "memoria" que
+	sync también cuenta con semáforos (mutex y variantes) para proteger variables o "memoria" que
 	comparten las goroutines. En este caso las gorrutinas no comparten información.
-	Por ejemplo si quisieramos utilizar una slice o map para guardar los resutados que se
+
+	Por ejemplo si quisiéramos utilizar una slice o map para guardar los resutados que se
 	despliegan cada llamada a CheckOneWebsite(...) esa estructura deberia estar protegida
 	por un sync.Mutex
 
 	Este ejemplo solamente utiliza el mecanismo de fork y join que se conoce como WaitGroup
 	el WaitGroup permite
-	  - llevar el contardor de goroutinas a sincroniizar Add(n)
+	  - llevar el contardor de goroutinas a sincronizar Add(n)
 	  - decrementar el contador cuando una goroutina termina Done()
 	  - esperar que todas las goroutinas en ejecución terminen Wait()
 
-	puede ejecuarlo con
+	puede ejecutarlo con
 		go run . para ejecutar el main o
-		go test -bench=. que ejecuta un benchamrk para ver los tiempo que domra la ejecución
+		go test -bench=. que ejecuta un benchamrk para ver los tiempo que demora la ejecución
 		concurrente
 
-	al ejecutar presetar atención al orden en que se depliega el workerId o el url y
+	al ejecutar prestar atención al orden en que se despliega el workerId o el url y
 	a la cantidad de segundos que duró la ejecución (con go test -bench)
 
 
@@ -50,7 +51,7 @@ func CheckWebsites(urls []string) {
 
 		wg.Add(1) //se agrega cada goroutina que se ejecuta
 
-		// se declara la función anonima que al ejecutarse recibe el scope en cual ejecuta
+		// se declara la función anónima que al ejecutarse recibe el scope en cual ejecuta
 		// notar que se pasan las variables url y workers porque cada goroutine tiene la referencia a la
 		// las variables y no tienen una copia. O sea, que al momento de ejecutarse el valor puede ser cualquiera
 		// sin embargo no se pasar wg porque justamente nos sirve que usar la referencia a ese valor dentro de la
