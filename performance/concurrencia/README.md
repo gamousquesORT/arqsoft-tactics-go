@@ -18,3 +18,9 @@ El primero **lanza como gorutina una función con nombre** y el segundo (v2) **l
 #### Carpeta - channels_v1 ####
 Este ejemplo utiliza otro mecanismo de sincronización de Go, los canales.
 En el mismo se lanzan las gorutinas y en lugar de imprimir el resultado en consola lo escriben a un canal, el cual es leído por la gorutina principal para desplegar por la consola de salida
+
+#### Carpeta - pipeline_v1 ####
+Este ejemplo arma un pipeline simple sin manejo de errores y utilizando el patron fan out / fan in.
+
+#### Carpeta - pipeline_v2 ####
+Este ejemplo arma un pipeline con mas pasos y con manejo de errores, utilizando el patron fan out / fan in. Se utiliza context para manejar el canal done y poder llamar una función en caso de cancelar. 
