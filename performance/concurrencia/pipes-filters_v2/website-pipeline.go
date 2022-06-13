@@ -1,17 +1,19 @@
 /*
 	este ejemplo utiliza canales para sincronizar las gorutinas y muestra el uso
 	del patrón pipeline y de sincronización Fan-out (varios gorutinas leyendo de un mismo canal), y hace un merge de los
-	resultados en un nuevo canal
+	resultados en un nuevo canal (fan -in)
 
 
-			   / -canal1 ----> gr1 (feedWebsites) ----\
-	generador / - canal2 ----> gr2 (feedWebsites) ---> merge() --> imprimir
+			   / -canal1 ----> gr1 (checkWebsite) ----\        /--> gr1 (convertResultaToUpperCase)---\
+	producer / - canal2 ----> gr2 (checkWebsite) ---> merge() / --> gr2 (convertResultaToUpperCase)--->merge()-->sink (imprimir)
 
 	en este ejemplo se utilizan el fan out y el fan in para mostrar ambos, pero no simpre es necesario utilizar ambos o ninguno
-	el beneficio del fan out es que se procesa un feed en varias gorutinas concurrentes.
+	el beneficio del fan out es que se procesa un feed en varias gorutinas concurrentes. se lanzan tantas gorutinas de cada paso como 
+	CPUs disponibles tengamos
 
 	ejemplo basado en
-		https://go.dev/blog/pipelines 	y el libro Concurrency in Go por Katherine Cox-Buday
+		https://go.dev/blog/pipelines , https://medium.com/amboss/applying-modern-go-concurrency-patterns-to-data-pipelines-b3b5327908d4
+		y el libro Concurrency in Go por Katherine Cox-Buday
 
 	puede ejecutarlo con
 		go run . para ejecutar el main o
@@ -29,12 +31,17 @@ package main
 
 import (
 	"fmt"
+	"errors"
 	"net/http"
 	"strings"
+	"context"
+	"log"
+	"runtime"
+	"sync"
 )
 
 // función extraida de checkWebsite para hacerla mas legible a checkWebsite
-func callHead(url string) string {
+func callHead(url string) (string, error) {
 	var ret string
 
 	// el que sigue es el mismo código que en el ejemplo secuencial
@@ -44,61 +51,74 @@ func callHead(url string) string {
 	} else {
 		// ok Head sin error, si no es ok retorna url:false si es ok url:true
 		if response.StatusCode != http.StatusOK {
-			ret = fmt.Sprintf("El url %s NO responde OK \n", url)
+			ret = fmt.Sprintf("El url %s NO responde OK código %d \n", url, response.StatusCode)
 		} else {
 			ret = fmt.Sprintf("El url %s responde OK \n", url)
 		}
 	}
-	return ret
+	return ret, err
 }
-
-
-
 
 // esta función es la que llama a las goroutinas que checkean los urls en paralelo 
 // usa el select que en caso de que haya algo en el canal de in lo procesa (callhead) y lo
 // empuja al canal out
 // el select chequea el done y en caso que venga algo en ese canal termina prolijamente la ejecución de 
 // la gorutina
-func checkWebsite(done <- chan struct {}, in <-chan string) <-chan string {
+func checkWebsite(ctx context.Context, in <-chan string) (<-chan string, <-chan error, error) {
 
 	out := make(chan string)
+	errorChannel := make(chan error)
+	
 	go func() {
 		defer close(out)
+		defer close(errorChannel)
+
 		for url := range in {
 			select {
-			case out <- callHead(url):
-			case <- done:
+			case <- ctx.Done():
 				return	
+			default:
+				url, err := callHead(url)
+				if err != nil {
+					errorChannel <- errors.New(url)
+				} else {
+					out <- url
+				}
+			
 			}
 		}
 	}()
 	
-	return out
+	return out, errorChannel, nil
 
 }
 
 //esta gorutina convierte un string a mayuscual
-func convertResultaToUpperCase(done <- chan struct {}, in <-chan string) <-chan string {
+func convertResultaToUpperCase(ctx context.Context, in <-chan string) (<-chan string, <-chan error, error) {
 
 	out := make(chan string)
+	errorChannel := make(chan error)
+
 	go func() {
 		defer close(out)
+		defer close(errorChannel)
+
 		for result := range in {
 			select {
-			case out <- strings.ToUpper(result):
-			case <- done:
-				return	
+			case <- ctx.Done():
+				return
+			default:
+				out <- strings.ToUpper(result)
 			}
 		}
 	}()
 	
-	return out
+	return out, errorChannel, nil
 
 }
 
 // funciona generadora es la fuente de datos que alimenta el stream que va a pasar por el pipeline. 
-func feedWebsites(done <- chan struct{}) <-chan string {
+func producer(ctx context.Context) (<-chan string, error) {
 	out := make(chan string)
 	
 	var websites = []string{
@@ -109,22 +129,106 @@ func feedWebsites(done <- chan struct{}) <-chan string {
 		"http://netflix.com",
 		"http://instagram.com",
 		"http://ingsoft.gaston.com",
+		"http://gitlab.com",
+		"http://gaston.arq.com",
 	}
 	go func ()  {
 		defer close(out)
 		for _, ws := range websites {
 			select {
-			case out <- ws:
-			case <-done:
+			case <-ctx.Done():
 				return
+			default:
+				out <- ws
 			}
 		}
 	}()
 	
+	return out, nil
+}
+
+
+func sink(ctx context.Context, cancel context.CancelFunc,values <-chan string, errors <-chan error) {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Print(ctx.Err().Error())
+			return
+			
+		case err, ok := <-errors:
+		if ok {
+       //cancel()
+				log.Print(err.Error())
+			}
+	
+		case val, ok := <-values:
+			if ok {
+				log.Printf("sink: %s", val)
+			} else {
+				log.Print("done")
+				return
+			}
+		}
+	}
+}
+
+
+func mergeStringChans(ctx context.Context, cs ...<-chan string) <-chan string {
+	var wg sync.WaitGroup
+	out := make(chan string)
+
+	output := func(c <-chan string) {
+		defer wg.Done()
+		for n := range c {
+			select {
+			case out <- n:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+
+	wg.Add(len(cs))
+	for _, c := range cs {
+		go output(c)
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
 	return out
 }
 
 
+func mergeErrorChans(ctx context.Context, cs ...<-chan error) <-chan error {
+	var wg sync.WaitGroup
+	out := make(chan error)
+
+	output := func(c <-chan error) {
+		defer wg.Done()
+		for n := range c {
+			select {
+			case out <- n:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+
+	wg.Add(len(cs))
+	for _, c := range cs {
+		go output(c)
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
+}
 
 /* esta función arma el pipeline
 	crear un canal de control para avisar a las gorutinas que terminen
@@ -138,26 +242,62 @@ func feedWebsites(done <- chan struct{}) <-chan string {
 */
 func WebsiteStatusChecker()	{
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+
 	//se crea un canal para comunicar que las gorutinas  terminen su trabajo y salgan prolijamente
 	done := make(chan struct{})
 	defer close(done)
 
+	fmt.Printf("---> llamar producer *****\n")
 	// empuja por el canal in los urls
-	in := feedWebsites(done)
-
-	// se crear un pipeline con 2 gorutinas encadenadas. hay un solo canal
-
-	firstFeeder := checkWebsite(done, in)
-	out := convertResultaToUpperCase(done, firstFeeder)
-
-
-	// se imprime el resultado leyendo del canal out.
-	for n := range out {
-		fmt.Printf(n)
+	in, err := producer(ctx)
+	if err != nil {
+		log.Fatal(err)
 	}
-	
-}
 
+
+	// fan out stage1
+	stage1Channels := []<-chan string{}
+	errors := []<-chan error{}
+	fmt.Printf("---> for stage1 *****\n")
+	for i := 0; i < runtime.NumCPU(); i++ {
+		fmt.Printf("---> for stage1 (%d) *****\n",i)
+		websiteCheckChannel, websiteCheckErrors, err := checkWebsite(ctx, in)
+		if err != nil {
+			log.Fatal(err)
+		}
+		stage1Channels = append(stage1Channels, websiteCheckChannel)
+		errors = append(errors, websiteCheckErrors)
+	}
+
+	// fan in - stage1
+	stage1Merged := mergeStringChans(ctx, stage1Channels...)
+
+	// fan out stage2
+	fmt.Printf("---> for stage2 *****\n")
+	stage2Channels := []<-chan string{}
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		fmt.Printf("---> for stage2 (%d) *****\n",i)
+		toUpperCaseChannel, toUpperErrors, err := convertResultaToUpperCase(ctx, stage1Merged)
+		if err != nil {
+			log.Fatal(err)
+		}
+		stage2Channels = append(stage2Channels, toUpperCaseChannel)
+		errors = append(errors, toUpperErrors)
+	}
+
+	stage2Merged := mergeStringChans(ctx, stage2Channels...)
+
+	// fan in - stage2
+	errorsMerged := mergeErrorChans(ctx, errors...)
+	fmt.Printf("---> sink *****\n")
+	sink(ctx, cancel, stage2Merged, errorsMerged)
+
+}
+	
 
 
 // solo llama a la función de verificar sitios con un slice de urls, se separó para poder invocar WebsiteStatusChecker(); 
