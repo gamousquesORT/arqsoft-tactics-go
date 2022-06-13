@@ -1,15 +1,17 @@
 /*
 	este ejemplo utiliza canales para sincronizar las gorutinas y muestra el uso
-	del patrón pipeline y de sincronización Fan-out (varios gorutinas leyendo de un mismo canal), y hace un merge de los
+	del patrón pipeline y Fan-out (varios gorutinas leyendo de un mismo canal), y hace un merge de los
 	resultados en un nuevo canal (fan -in)
 
 
 			   / -canal1 ----> gr1 (checkWebsite) ----\        /--> gr1 (convertResultaToUpperCase)---\
 	producer / - canal2 ----> gr2 (checkWebsite) ---> merge() / --> gr2 (convertResultaToUpperCase)--->merge()-->sink (imprimir)
 
-	en este ejemplo se utilizan el fan out y el fan in para mostrar ambos, pero no simpre es necesario utilizar ambos o ninguno
+	en el ejemplo se utilizan el fan out y el fan in para mostrar ambos, pero no siempre es necesario utilizarlos. 
 	el beneficio del fan out es que se procesa un feed en varias gorutinas concurrentes. se lanzan tantas gorutinas de cada paso como 
-	CPUs disponibles tengamos
+	CPUs disponibles tengamos.
+
+	también se agregó el uso de Contexto para cancelar (la opción de cancel esta comentada en el sink)
 
 	ejemplo basado en
 		https://go.dev/blog/pipelines , https://medium.com/amboss/applying-modern-go-concurrency-patterns-to-data-pipelines-b3b5327908d4
@@ -40,7 +42,7 @@ import (
 	"sync"
 )
 
-// función extraida de checkWebsite para hacerla mas legible a checkWebsite
+// función extraída de checkWebsite para hacerla mas legible a checkWebsite
 func callHead(url string) (string, error) {
 	var ret string
 
@@ -59,11 +61,12 @@ func callHead(url string) (string, error) {
 	return ret, err
 }
 
-// esta función es la que llama a las goroutinas que checkean los urls en paralelo 
+// esta función es la que llama a la goroutina que checkean los urls  
 // usa el select que en caso de que haya algo en el canal de in lo procesa (callhead) y lo
 // empuja al canal out
 // el select chequea el done y en caso que venga algo en ese canal termina prolijamente la ejecución de 
 // la gorutina
+// si un url no existe lo pasa al canal de errores para que lo maneje el sink
 func checkWebsite(ctx context.Context, in <-chan string) (<-chan string, <-chan error, error) {
 
 	out := make(chan string)
@@ -93,7 +96,7 @@ func checkWebsite(ctx context.Context, in <-chan string) (<-chan string, <-chan 
 
 }
 
-//esta gorutina convierte un string a mayuscual
+//esta gorutina convierte un string a mayúscula
 func convertResultaToUpperCase(ctx context.Context, in <-chan string) (<-chan string, <-chan error, error) {
 
 	out := make(chan string)
@@ -147,7 +150,8 @@ func producer(ctx context.Context) (<-chan string, error) {
 	return out, nil
 }
 
-
+// función sink que despliega los url procesados. en caso de que venga algo en el canal de errores cancela todos los pipelines
+// (ver cancel comentado para hacer el log y no terminar todo el pipeline)
 func sink(ctx context.Context, cancel context.CancelFunc,values <-chan string, errors <-chan error) {
 	for {
 		select {
@@ -172,7 +176,7 @@ func sink(ctx context.Context, cancel context.CancelFunc,values <-chan string, e
 	}
 }
 
-
+// mergea canales de entrada a uno de salida
 func mergeStringChans(ctx context.Context, cs ...<-chan string) <-chan string {
 	var wg sync.WaitGroup
 	out := make(chan string)
@@ -201,7 +205,7 @@ func mergeStringChans(ctx context.Context, cs ...<-chan string) <-chan string {
 	return out
 }
 
-
+// mergea los canales de error en uno solo
 func mergeErrorChans(ctx context.Context, cs ...<-chan error) <-chan error {
 	var wg sync.WaitGroup
 	out := make(chan error)
@@ -231,11 +235,12 @@ func mergeErrorChans(ctx context.Context, cs ...<-chan error) <-chan error {
 }
 
 /* esta función arma el pipeline
-	crear un canal de control para avisar a las gorutinas que terminen
-	llama a feedWebsites que es un generador de datos (convierte los datos del slice en un stream
+	crear un context para avisar mediante el canal done a las gorutinas que terminen
+	llama a generator que es el generador de datos (convierte los datos del slice en un stream
 	que empuja por el canal in <-string)
-	lo que viene en el canal se abre en dos gorutinas (checkWebsite) y luego el resultado de los canales
-	se mergea en un único canal para poder imprimir. 
+	lo que viene en el canal se abre en varias gorutinas (checkWebsite) y luego el resultado de los canales
+	se mergea en un único canal para poder pasarla al siguiente filtro (convertResultaToUpperCase), finalmente se pasa el sink que es 
+	el filtro que imprime. 
 	recodar que los pipelines en general tienen un source (el generador), varios filtros y que en general terminan en un sink que 
 	es donde se juntan todas las ramas o donde termina el pipeline
 
